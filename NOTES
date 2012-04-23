@@ -1,0 +1,174 @@
+Algorithms
+==========
+
+#
+# The following is the reduced algorithm,
+#
+Algo(Eth):
+	init(Frame);
+	Frame = read_frame_from_iface(Eth)
+	
+	if (eth_protocol(Frame) == IP)
+		if (peek_ip_protocol(Frame) == L2_PROTO_NUM)
+			Frame = strip_for_payload_frame(Frame)
+		dest_ip = peek_ip_dest(Frame)
+	else if (eth_protocol(Frame) == ARP)
+		dest_ip = peek_arp_dest(Frame)
+	else if (eth_protocol(Frame) == RARP)
+		dest_ip = peek_rarp_dest(Frame)
+
+	if (route_gateway(dest_ip, Eth))
+		P = make_ip()
+		set_ip_payload(P, Frame)
+		set_ip_dest(route_gateway(dest_ip, Eth))
+		send_ip(P)
+	else if (route_iface(dest_ip, Eth))
+		write_to_iface(route_iface(dest_ip, Eth), Frame)
+	discard(Frame)
+
+# Multithreaded ..
+#
+# per interface thread,
+#
+iface-worker-thread(Eth):
+
+	init(Frame);
+	Frame = read_frame_from_iface(Eth)
+	
+	if (eth_protocol(Frame) == IP)
+		if (peek_ip_protocol(Frame) == L2_PROTO_NUM)
+			Frame = strip_for_payload_frame(Frame)
+		dest_ip = peek_ip_dest(Frame)
+	else if (eth_protocol(Frame) == ARP)
+		dest_ip = peek_arp_dest(Frame)
+	else if (eth_protocol(Frame) == RARP)
+		dest_ip = peek_rarp_dest(Frame)
+
+	if (route_gateway(dest_ip, Eth))
+		P = make_ip()
+		set_ip_payload(P, Frame)
+		set_ip_dest(route_gateway(dest_ip, Eth))
+		mutex_lock()
+		send_ip(P)
+		mutex_unlock()
+	else if (route_iface(dest_ip, Eth))
+		mutex_lock()
+		write_to_iface(route_iface(dest_ip, Eth), Frame);
+		mutex_unlock()
+	discard(Frame);
+
+
+   +----------------------------------+
+   | Project Description/Requirements |
+   +----------------------------------+
+
+  ``I have included a copy of the paper we submitted recently to a conference
+    that deals with the interconnection of ad-hoc networks via an infrastructured
+    network. We sorted out the problem at layer 3 (by using redistribution) and
+    currently, I am needing someone to take a look at it from a layer 2 perspective.
+    Consider the following scenario:
+
+    theoritical model
+    -----------------
+   
+
+    (ad-hoc node1) --- (border gateway1) 
+                                        \
+                                         \
+                                     (ip cloud)
+                                         /
+                                        /
+    (ad-hoc node2) --- (border gateway2) 
+
+  ``In this scenario, the IP cloud is your regular Internet. In the paper that I
+    have included along with this mail, we employ redistribution techniques to
+    populate the routing tables on both the border gateways to provide
+    connectivity between the two ad-hoc nodes. What I am needing is for an
+    application to be written in C (on linux) that will read packets flowing
+    into border gateway1 (from ad-hoc node1), transparently move the layer 2
+    frame (not the layer 3 packet) onto border gateway2 and hence towards ad-hoc
+    node2.''
+
+    test bed
+    --------
+
+    ---o(eth0):linux-box1:(eth1)o---.
+                                     \  
+                                      \
+                                  (IP network)
+                                      /
+                                     /
+    ---o(eth0):linux-box2:(eth1)o---'
+
+
+  ``eth0 and eth1 are two interfaces on a linux box (take any PC that is
+    available and make sure there are two network cards in it). Typically, the
+    first recognized network card is named eth0 and the second is named eth1.
+    Let us assume that we are running Redhat 9.0 with the stock kernel (I
+    wouldn't mind you guys running Fedora Core either but it is a matter of
+    personal choice. Bottomline, I don't care, as long it is a current version
+    of Linux).''
+
+
+  ``Linux-boxes 1 and 2 would be the Border Gateways.''
+
+    Algorithm (TODO: Elucidate)
+    ---------
+
+  ``1) On linux-box1, grab every ethernet frame that is seen on eth0.
+    2) Use this ethernet frame as a payload for a new IP packet. This new IP
+       packet needs to have a source IP address of linux-box1's eth1 and a
+       destination IP address of linux-box2's eth1.
+    3) On linux-box2, grab the IP packet that was sent from linux-box1 (step 2).
+    4) Extract the payload (which is the entire ethernet frame as received on
+       linux-box1's eth0). This payload, or ethernet frame, needs to be placed on
+       eth0.
+     
+  ``application needs to be able to move ethernet frames from linux-box2 to linux-box1 
+    also (4-3-2-1). linux-box2's eth0 interface.''
+
+    Software
+    --------
+
+    1. Fedora Core 3 (Kernel 2.6)
+    2. gcc 3.4.2
+    2. libpcap library for packet capture.
+    3. libnet library for packet generation.
+
+   +---------------------+
+   | Networking Concepts |
+   +---------------------+
+
+   - SNAP, Sub-Net Access Protocol.
+   - LLC, Logical Link Control.
+
+   - IP datagrams are sent on IEEE 802 networks encapsulated within the
+    802.2 LLC and SNAP data link layers, and the 802.3, 802.4, or 802.5
+    physical networks layers.  
+   - The broadcast Internet address = the address on that network with a
+    host part of all binary ones.
+   - The broadcast IEEE 802 address = all binary ones.
+   - Medium Access Control (MAC) Ethernet header format (802.3/4/5)
+
+    +------------------------------------+
+    |        PREAMBLE (7 Octets)         |
+    +------------------------------------+
+    |           SFD (1 Octet)            |
+    +------------------------------------+
+    |      DEST. ADDRESS (6 Octets)      |
+    +------------------------------------+
+    |      SRC. ADDRESS (6 Octets)       |
+    +------------------------------------+
+    |       LENGTH/TYPE (2 Octets)       |
+    +------------------------------------+
+
+    +--------+--------+--------+
+    | DSAP=K1| SSAP=K1| Control|                                802.2 LLC
+    +--------+--------+--------+
+
+    +--------+--------+---------+--------+--------+
+    |Protocol Id or Org Code =K2|    EtherType    |            802.2 SNAP
+    +--------+--------+---------+--------+--------+
+
+    K1 = 170 and K2 = 0 (Unumbered Information).  
+    EtherType: for IP, 0x2048 and for ARP, 0x2054.

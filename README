@@ -1,0 +1,103 @@
++-----------------+
+| Layer2 - README |
++-----------------+
+
+Layer2 is a tiny program which can sniff ethernet frames from network interface
+devices and transport them to another instance of Layer2 where it is
+redistributed, all based on a set of (routing+filtering) rules specified
+through a configuration file.
+
+Layer2 uses libpcap for packet capturing, and libnet for creating IP packets and 
+injecting them into the network.
+
+A machine that hosts layer2 is said to be the border gateway and listens to all
+interfaces under its management for ethernet frames, filtering and capturing
+only those which are of interest. Based on the rules, an ethernet frame which
+is destined for a remote node, behind another border gateway, is captured and
+packed inside an IP packet with an upper layer protocol number set to
+L2_PROTO_NUM (defined in layer2.h). This packet is then sent to the remote
+border gateway (which must host another instance of layer2) using normal
+internet routing mechanisms. Once the remote instance of layer2 obtains the
+frame containing this packet, it unpacks it and writes the frame to the
+appropriate interface device, again based on the local specifications.
+
+Using "layer2"
+--------------
+
+$ ./layer2 < config.conf
+
+layer2 reads the STDIN for configuration specifications.
+
+Configuration
+-------------
+
+The configuration plays a crucial role in the functioning of layer2. The 
+strucuture of the configuration file is simple and straightforward.
+
+- Anything after the '#' till the newline is a comment.
+- A routing rule must be associated with frames captured at an interface
+  device. The interface must be defined as follows,
+
+	[iface-dev-name: protocols]
+
+  where `iface-dev-name' could be eth0, eth1, rl0 etc. and `protocols' are one 
+  or more of, ip, arp, rarp, dec. Example
+
+	[eth0: ip arp]
+
+  specifies that layer2 should only capture ethernet frames of type IP and ARP
+  from device eth0.
+- Following the interface definitions, the rules of routing for packets captured
+  from it must be specified. The format for that is -
+
+  Destination-IP	Net-Mask	Border-Gateway-IP	Interface
+
+  * Destination-IP: This is the destination ip address of the captured packet. 
+    This field is used for filtering the packets to be transported.
+  * Net-Mask: The mask to be applied.
+  * Border-Gateway-IP: The ip address of the remote border gateway to which the
+    packet is to be packed and transported to, for redistribution. It can be
+    a valid IP address or '*' which denotes NONE.
+  * Interface: The interface device to which the packet is to be written. This
+    is when the border gateway is set to '*'. The value could be a valid
+    device name or '*' denoting NONE.
+
+  NOTE: Atleast one of gateway-ip and interface must be specified.
+
+  Based on this routing rule, layer2 compiles filter rules and routes packets
+  seen at the interface. 
+
+Example
+=======
+
+This is an example of config files for the following setup,
+
+    192.168.1.0/24        150.1.1.1
+
+    ---o(eth0):linux-box1:(eth1)o---.
+                                     \  
+                                      \
+                                  (IP network)
+                                      /
+                                     /
+    ---o(eth0):linux-box2:(eth1)o---'
+
+    192.168.2.0/24        152.1.1.2
+
+Both linux-boxes must run layer2 configured as follows -
+
+config.conf at linux-box1
+-------------------------
+
+[eth0: ip arp]
+192.168.2.0	255.255.255.0	152.1.1.2	*
+[eth1: ip]
+192.168.1.0	255.255.255.0	*		eth0
+
+config.conf at linux-box2
+-------------------------
+
+[eth0: ip arp]
+192.168.1.0	255.255.255.0	150.1.1.1	*
+[eth1: ip]
+192.168.2.0	255.255.255.0	*		eth0
